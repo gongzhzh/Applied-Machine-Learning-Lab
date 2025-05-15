@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.base import BaseEstimator
+from scipy.linalg.blas import ddot, dscal, daxpy
 
 class LinearClassifier(BaseEstimator):
     """
@@ -58,7 +59,7 @@ class Pegasos(LinearClassifier):
         self.n_iter = n_iter
         self.lambda_param = lambda_param
 
-    def fit(self, X, Y):
+    def fit(self, X, Y, seed=None):
         # First determine which output class will be associated with positive
         # and negative scores, respectively.
         self.find_classes(Y)
@@ -78,10 +79,11 @@ class Pegasos(LinearClassifier):
         # Pegasos Algorithm
         # Iteration Counter
         t = 0  
-        
+        rng = np.random.default_rng(seed) 
         for i in range(self.n_iter):
             # Select Training Pair
-            for x, y in zip(X, Ye):
+            for idx in rng.permutation(n_samples):
+                x, y = X[idx], Ye[idx]
                 # Increment Iteration
                 t += 1
                 eta = 1.0 / (self.lambda_param * t)
@@ -90,7 +92,20 @@ class Pegasos(LinearClassifier):
                     self.w = (1 - eta * self.lambda_param) * self.w + eta * y * x
                 else:
                     self.w = (1 - eta * self.lambda_param) * self.w
-
+                B = 1/np.sqrt(self.lambda_param)
+                norm = np.linalg.norm(self.w)
+                if norm > B: self.w *= B / norm
+            # for x, y in zip(X, Ye):
+            #     # Increment Iteration
+            #     t += 1
+            #     eta = 1.0 / (self.lambda_param * t)
+            #     score = np.dot(self.w, x)
+            #     if y * score < 1:
+            #         self.w = (1 - eta * self.lambda_param) * self.w + eta * y * x
+            #     else:
+            #         self.w = (1 - eta * self.lambda_param) * self.w
+        
+        
 class LogisticRegression(LinearClassifier):
     """
     Implementation of the Pegasos algorithm for binary linear classification.
@@ -132,3 +147,46 @@ class LogisticRegression(LinearClassifier):
     
                 # Gradient descent step
                 self.w = self.w - eta * loss
+                
+class Pegasos_opt(LinearClassifier):
+    
+    def __init__(self, n_iter=100, lambda_param=0.0001):
+        self.n_iter = n_iter
+        self.lambda_param = lambda_param
+
+    def fit(self, X, Y):
+        # First determine which output class will be associated with positive
+        # and negative scores, respectively.
+        self.find_classes(Y)
+
+        # Convert all outputs to +1 (for the positive class) or -1 (negative).
+        Ye = self.encode_outputs(Y)
+        
+        # If necessary, convert the sparse matrix returned by a vectorizer
+        # into a normal NumPy matrix.
+        if not isinstance(X, np.ndarray):
+            X = X.toarray()
+        
+        # Initialize the weight vector to all zeros.
+        n_samples, n_features = X.shape
+        self.w = np.zeros(n_features)
+
+        # Pegasos Algorithm
+        # Iteration Counter
+        t = 0  
+        
+        for i in range(self.n_iter):
+            # Select Training Pair
+            for x, y in zip(X, Ye):
+                # Increment Iteration
+                t += 1
+                eta = 1.0 / (self.lambda_param * t)
+                scale = 1.0 - eta * self.lambda_param
+                w = np.ascontiguousarray(self.w, dtype=np.float64)
+                x = np.ascontiguousarray(x, dtype=np.float64)
+                score = ddot(w, x) 
+                dscal(scale, self.w) 
+                if y * score < 1:
+                    self.w = (1 - eta * self.lambda_param) * self.w + eta * y * x
+                else:
+                    self.w = (1 - eta * self.lambda_param) * self.w
