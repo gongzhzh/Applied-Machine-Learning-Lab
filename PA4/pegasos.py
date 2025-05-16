@@ -203,7 +203,6 @@ class Pegasos_sparse_vectors(LinearClassifier):
         self.find_classes(Y)
         Ye = self.encode_outputs(Y)
 
-        # 保持 X 为 CSR，千万别 toarray()
         assert sparse.issparse(X)
 
         n_samples, n_features = X.shape
@@ -221,18 +220,65 @@ class Pegasos_sparse_vectors(LinearClassifier):
                 eta   = 1.0 / (self.lambda_param * t)
                 scale = 1.0 - eta * self.lambda_param
 
-                # 1) 衰减
+                # 1) 
                 self.w *= scale
 
-                # 2) margin
+                # 2) 
                 score = float(safe_sparse_dot(x, self.w))
 
-                # 3) 违规则 O(nnz) 原位更新
+                # 3) 
                 if y * score < 1:
                     self.w[x.indices] += eta * y * x.data
 
-                # 4) 投影
+                # 4) 
                 norm = np.linalg.norm(self.w)
                 if norm > B:
                     self.w *= (B / norm)
         return self
+
+class Pegasos_vec_scale(LinearClassifier):
+    
+    def __init__(self, n_iter=100, lambda_param=0.0001):
+        self.n_iter = n_iter
+        self.lambda_param = lambda_param
+    
+    def fit(self, X, Y):
+        # First determine which output class will be associated with positive
+        # and negative scores, respectively.
+        self.find_classes(Y)
+
+        # Convert all outputs to +1 (for the positive class) or -1 (negative).
+        Ye = self.encode_outputs(Y)
+        
+        # If necessary, convert the sparse matrix returned by a vectorizer
+        # into a normal NumPy matrix.
+        if not isinstance(X, np.ndarray):
+            X = X.toarray()
+        
+        # Initialize the weight vector to all zeros.
+        n_samples, n_features = X.shape
+        self.w = np.zeros(n_features)
+
+        # Pegasos Algorithm 
+        alpha = 1 
+        t = 0
+
+        w = np.ascontiguousarray(self.w, dtype=np.float64)
+        for i in range(self.n_iter):
+            # Select Training Pair
+            for x, y in zip(X, Ye):
+                t += 1
+                eta = 1.0 / (self.lambda_param * t)
+                scale = 1.0 - eta * self.lambda_param
+                x = np.ascontiguousarray(x, dtype=np.float64)
+                score = alpha * ddot(w, x) 
+                dscal(scale, w)
+                if y * score < 1:
+                    daxpy(x, w, a=(eta * y / alpha))
+                
+                alpha = (1 - eta * self.lambda_param) * alpha
+                alpha = max(alpha, 1e-8)
+        
+        self.w = alpha * w
+
+
