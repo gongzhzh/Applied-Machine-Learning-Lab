@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.base import BaseEstimator
 from scipy.linalg.blas import ddot, dscal, daxpy
-
+from aml_perceptron import sparse_dense_dot
 class LinearClassifier(BaseEstimator):
     """
     General class for binary linear classifiers. Implements the predict
@@ -148,7 +148,7 @@ class LogisticRegression(LinearClassifier):
                 # Gradient descent step
                 self.w = self.w - eta * loss
                 
-class Pegasos_opt(LinearClassifier):
+class Pegasos_faster_linear(LinearClassifier):
     
     def __init__(self, n_iter=100, lambda_param=0.0001):
         self.n_iter = n_iter
@@ -190,3 +190,49 @@ class Pegasos_opt(LinearClassifier):
                     self.w = (1 - eta * self.lambda_param) * self.w + eta * y * x
                 else:
                     self.w = (1 - eta * self.lambda_param) * self.w
+                    
+from scipy import sparse
+from sklearn.utils.extmath import safe_sparse_dot
+
+class Pegasos_sparse_vectors(LinearClassifier):
+    def __init__(self, n_iter=100, lambda_param=0.0001):
+        self.n_iter = n_iter
+        self.lambda_param = lambda_param
+        
+    def fit(self, X, Y, seed=None):
+        self.find_classes(Y)
+        Ye = self.encode_outputs(Y)
+
+        # 保持 X 为 CSR，千万别 toarray()
+        assert sparse.issparse(X)
+
+        n_samples, n_features = X.shape
+        self.w = np.zeros(n_features, dtype=np.float32)
+
+        t = 0
+        B = 1.0 / np.sqrt(self.lambda_param)
+        rng = np.random.default_rng(seed)
+
+        for _ in range(self.n_iter):
+            for idx in rng.permutation(n_samples):
+                x = X[idx]           # 1×d csr_matrix
+                y = Ye[idx]
+                t += 1
+                eta   = 1.0 / (self.lambda_param * t)
+                scale = 1.0 - eta * self.lambda_param
+
+                # 1) 衰减
+                self.w *= scale
+
+                # 2) margin
+                score = float(safe_sparse_dot(x, self.w))
+
+                # 3) 违规则 O(nnz) 原位更新
+                if y * score < 1:
+                    self.w[x.indices] += eta * y * x.data
+
+                # 4) 投影
+                norm = np.linalg.norm(self.w)
+                if norm > B:
+                    self.w *= (B / norm)
+        return self
